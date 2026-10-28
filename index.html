@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestor de actividades</title>
+<style>
+  body {
+    font-family: sans-serif;
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 0 15px;
+    color: #000000;
+  }
+
+  h1 { margin-bottom: 4px; }
+  p { margin-top: 0; color: #444; }
+
+  .contenedor {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .col-form { flex: 1; min-width: 260px; }
+  .col-lista { flex: 2; min-width: 300px; }
+
+  label {
+    display: block;
+    margin-top: 10px;
+    font-size: 0.9rem;
+    font-weight: bold;
+  }
+
+  input, textarea, select {
+    width: 100%;
+    padding: 6px;
+    margin-top: 2px;
+    box-sizing: border-box;
+  }
+
+  button {
+    margin-top: 10px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+
+  .mensaje {
+    margin-top: 10px;
+    font-size: 0.85rem;
+    font-weight: bold;
+  }
+
+  .barra {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .resumen {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+  }
+
+  .chip {
+    background: #eeeeee;
+    padding: 2px 6px;
+    border: 1px solid #ccc;
+  }
+
+  ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  li.actividad {
+    border: 1px solid #ccc;
+    padding: 10px;
+    margin-bottom: 8px;
+  }
+
+  .cabecera {
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+  }
+
+  .desc {
+    margin: 6px 0;
+    font-size: 0.9rem;
+  }
+
+  .acciones {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .acciones select {
+    width: auto;
+    padding: 2px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Gestor de actividades</h1>
+  <p>Registra, consulta y actualiza las actividades del equipo.</p>
+</header>
+
+<div class="contenedor">
+  <section class="col-form">
+    <h2 id="titulo-form">Nueva actividad</h2>
+    <label for="nombre">Nombre</label>
+    <input id="nombre" maxlength="100" placeholder="Ej. Preparar informe">
+
+    <label for="descripcion">Descripción</label>
+    <textarea id="descripcion" maxlength="500" placeholder="Qué hay que hacer"></textarea>
+
+    <label for="estado">Estado</label>
+    <select id="estado">
+      <option>Pendiente</option>
+      <option>En proceso</option>
+      <option>Completada</option>
+    </select>
+
+    <div>
+      <button id="guardar" type="button">Registrar actividad</button>
+      <button id="cancelar" type="button" hidden>Cancelar</button>
+    </div>
+    <div id="mensaje" class="mensaje"></div>
+  </section>
+
+  <section class="col-lista">
+    <h2 id="titulo-lista">Actividades</h2>
+    <div class="barra">
+      <input id="buscar" type="search" placeholder="Buscar...">
+      <select id="filtro">
+        <option value="">Todos los estados</option>
+        <option>Pendiente</option>
+        <option>En proceso</option>
+        <option>Completada</option>
+      </select>
+    </div>
+    <div id="resumen" class="resumen"></div>
+    <ul id="lista"></ul>
+  </section>
+</div>
+
+<script>
+const API = '/api/actividades';
+let actividades = [];
+let editandoId = null;
+
+const $ = (id) => document.getElementById(id);
+const clase = (estado) => estado.replace(/ /g, '-');
+
+function escapar(texto) {
+  const d = document.createElement('div');
+  d.textContent = texto;
+  return d.innerHTML;
+}
+
+function mostrarMensaje(texto, tipo) {
+  const m = $('mensaje');
+  m.textContent = texto;
+  m.className = 'mensaje ' + (tipo || '');
+}
+
+async function pedir(url, opciones) {
+  const r = await fetch(url, opciones);
+  const datos = await r.json();
+  if (!r.ok) throw new Error(datos.error || 'Ocurrió un error.');
+  return datos;
+}
+
+async function cargar() {
+  try {
+    actividades = await pedir(API);
+    pintar();
+  } catch (e) {
+    mostrarMensaje('No se pudo conectar con el servidor.', 'error');
+  }
+}
+
+function pintar() {
+  const texto = $('buscar').value.trim().toLowerCase();
+  const filtro = $('filtro').value;
+
+  $('resumen').innerHTML = ['Pendiente', 'En proceso', 'Completada']
+    .map((e) => `<span class="chip">${e}: ${actividades.filter((a) => a.estado === e).length}</span>`)
+    .join('');
+
+  const visibles = actividades.filter((a) =>
+    (!filtro || a.estado === filtro) &&
+    (!texto || a.nombre.toLowerCase().includes(texto) || a.descripcion.toLowerCase().includes(texto))
+  );
+
+  if (!visibles.length) {
+    $('lista').innerHTML = `<li>${actividades.length ? 'Sin coincidencias.' : 'No hay actividades.'}</li>`;
+    return;
+  }
+
+  $('lista').innerHTML = visibles.map((a) => `
+    <li class="actividad">
+      <div class="cabecera">
+        <span>${escapar(a.nombre)}</span>
+        <small>[${a.estado}]</small>
+      </div>
+      <p class="desc">${escapar(a.descripcion) || 'Sin descripción'}</p>
+      <div class="acciones">
+        <select data-cambiar="${a.id}">
+          ${['Pendiente', 'En proceso', 'Completada']
+            .map((e) => `<option ${e === a.estado ? 'selected' : ''}>${e}</option>`).join('')}
+        </select>
+        <button data-editar="${a.id}">Editar</button>
+        <button data-eliminar="${a.id}">Eliminar</button>
+      </div>
+    </li>`).join('');
+}
+
+function limpiarFormulario() {
+  editandoId = null;
+  $('nombre').value = '';
+  $('descripcion').value = '';
+  $('estado').value = 'Pendiente';
+  $('titulo-form').textContent = 'Nueva actividad';
+  $('guardar').textContent = 'Registrar actividad';
+  $('cancelar').hidden = true;
+}
+
+$('guardar').addEventListener('click', async () => {
+  const cuerpo = {
+    nombre: $('nombre').value,
+    descripcion: $('descripcion').value,
+    estado: $('estado').value,
+  };
+  try {
+    if (editandoId === null) {
+      await pedir(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      mostrarMensaje('Actividad registrada.', 'ok');
+    } else {
+      await pedir(`${API}/${editandoId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      mostrarMensaje('Cambios guardados.', 'ok');
+    }
+    limpiarFormulario();
+    await cargar();
+  } catch (e) {
+    mostrarMensaje(e.message, 'error');
+  }
+});
+
+$('cancelar').addEventListener('click', () => { limpiarFormulario(); mostrarMensaje(''); });
+$('buscar').addEventListener('input', pintar);
+$('filtro').addEventListener('change', pintar);
+
+$('lista').addEventListener('click', async (ev) => {
+  const idEditar = ev.target.dataset.editar;
+  const idEliminar = ev.target.dataset.eliminar;
+  if (idEditar) {
+    const a = actividades.find((x) => x.id === Number(idEditar));
+    editandoId = a.id;
+    $('nombre').value = a.nombre;
+    $('descripcion').value = a.descripcion;
+    $('estado').value = a.estado;
+    $('titulo-form').textContent = 'Editar actividad';
+    $('guardar').textContent = 'Guardar cambios';
+    $('cancelar').hidden = false;
+    $('nombre').focus();
+  }
+  if (idEliminar && confirm('¿Eliminar esta actividad?')) {
+    try {
+      await pedir(`${API}/${idEliminar}`, { method: 'DELETE' });
+      if (editandoId === Number(idEliminar)) limpiarFormulario();
+      mostrarMensaje('Actividad eliminada.', 'ok');
+      await cargar();
+    } catch (e) { mostrarMensaje(e.message, 'error'); }
+  }
+});
+
+$('lista').addEventListener('change', async (ev) => {
+  const id = ev.target.dataset.cambiar;
+  if (!id) return;
+  const a = actividades.find((x) => x.id === Number(id));
+  try {
+    await pedir(`${API}/${id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombre: a.nombre, descripcion: a.descripcion, estado: ev.target.value }),
+    });
+    await cargar();
+  } catch (e) { mostrarMensaje(e.message, 'error'); }
+});
+
+cargar();
+</script>
+</body>
+</html>
